@@ -1,6 +1,8 @@
 export interface CycleTarget {
   sell: number;
   buy: number;
+  sellQty?: number;       // undefined = full position
+  chasePercent?: number;  // % above sell to chase back in, default 12
 }
 
 export interface Stock {
@@ -19,11 +21,16 @@ export interface Stock {
 
 export interface CycleResult {
   sharesBefore: number;
-  sharesAfter: number;
+  sharesAfter: number;        // optimal: GTC fires at buy price
+  sharesAfterChase: number;   // worst case: chased back in above sell
   gainShares: number;
   gainPct: number;
   sell: number;
   buy: number;
+  tradeQty: number;           // shares actually sold
+  coreQty: number;            // shares held throughout
+  chasePrice: number;         // price at which user chases back in
+  isPartial: boolean;         // sellQty < full position
   valid: boolean;
 }
 

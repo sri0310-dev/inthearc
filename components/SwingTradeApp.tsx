@@ -157,7 +157,7 @@ export default function SwingTradeApp() {
     setNotificationsEnabled(permission === 'granted');
   }, []);
 
-  const handleCycleUpdate = useCallback((stockId: string, cycleIndex: number, field: 'sell' | 'buy', value: number) => {
+  const handleCycleUpdate = useCallback((stockId: string, cycleIndex: number, field: 'sell' | 'buy' | 'sellQty' | 'chasePercent', value: number) => {
     setStocks((prev) =>
       prev.map((s) => {
         if (s.id !== stockId) return s;

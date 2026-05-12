@@ -16,10 +16,24 @@ export function computeCycles(
     };
     const { sell, buy } = cycle;
     const valid = sell > 0 && buy > 0 && sell > buy;
-    const sharesAfter = valid ? shares * (sell / buy) : shares;
+
+    const tradeQty = Math.min(cycle.sellQty ?? shares, shares);
+    const coreQty = shares - tradeQty;
+    const isPartial = tradeQty < shares;
+
+    const chasePct = cycle.chasePercent ?? 12;
+    const chasePrice = sell * (1 + chasePct / 100);
+
+    const sharesAfter = valid ? coreQty + tradeQty * (sell / buy) : shares;
+    const sharesAfterChase = valid ? coreQty + tradeQty * (sell / chasePrice) : shares;
     const gainShares = sharesAfter - shares;
-    const gainPct = valid ? (sell / buy - 1) * 100 : 0;
-    results.push({ sharesBefore: shares, sharesAfter, gainShares, gainPct, sell, buy, valid });
+    const gainPct = valid ? (sharesAfter / shares - 1) * 100 : 0;
+
+    results.push({
+      sharesBefore: shares, sharesAfter, sharesAfterChase,
+      gainShares, gainPct, sell, buy,
+      tradeQty, coreQty, chasePrice, isPartial, valid,
+    });
     shares = sharesAfter;
   }
   return results;

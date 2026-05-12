@@ -7,7 +7,7 @@ interface Props {
   stocks: Stock[];
   activeCycles: number;
   onCyclesChange: (n: number) => void;
-  onCycleUpdate: (stockId: string, cycleIndex: number, field: 'sell' | 'buy', value: number) => void;
+  onCycleUpdate: (stockId: string, cycleIndex: number, field: 'sell' | 'buy' | 'sellQty' | 'chasePercent', value: number) => void;
   onTargetUpdate: (stockId: string, value: number) => void;
 }
 
@@ -248,6 +248,9 @@ function BlendedView({ stocks, activeCycles, onCyclesChange }: { stocks: Stock[]
                     {row.stockData.map((d, si) => (
                       <td key={si} className="px-2 py-3 text-center">
                         <div className="font-bold text-[var(--text)]">{fmtShares(d.shares)}</div>
+                        {/* Live price value */}
+                        <div className="text-[10px] text-[var(--text-2)]">{fmt(d.valueNow)}</div>
+                        {/* Target price value */}
                         <div className="text-[10px]" style={{ color: 'var(--success)' }}>{fmt(d.valueAtTarget)}</div>
                         {i > 0 && d.gainPct > 0 && (
                           <div className="text-[9px]" style={{ color: stocks[si].color }}>+{d.gainPct.toFixed(1)}%</div>
@@ -328,7 +331,7 @@ function PriceControl({ label, arrow, arrowColor, value, min, max, step, color, 
 // ─── Single stock view ───────────────────────────────────────────────────────
 function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
   stock: Stock; activeCycles: number;
-  onCycleUpdate: (cycleIndex: number, field: 'sell' | 'buy', value: number) => void;
+  onCycleUpdate: (cycleIndex: number, field: 'sell' | 'buy' | 'sellQty' | 'chasePercent', value: number) => void;
   onTargetUpdate: (value: number) => void;
 }) {
   const cycleResults = useMemo(
@@ -386,9 +389,12 @@ function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
           const sellMax = stock.targetPrice * 1.15;
           const buyMin = stock.currentPrice * 0.5;
           const buyMax = cycle.sell * 0.99;
+          const isPartial = result.isPartial;
+          const chaseGainPct = result.valid ? (result.sharesAfterChase / result.sharesBefore - 1) * 100 : 0;
 
           return (
             <div key={i} className={`rounded-xl p-3 ${sectionClass}`}>
+              {/* Cycle header row */}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full"
@@ -405,12 +411,88 @@ function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
                   <span className="text-[10px] text-[var(--danger)]">Buy must be &lt; Sell</span>
                 )}
               </div>
+
+              {/* Qty to sell row */}
+              <div className="flex items-center gap-2 mb-2 px-0.5">
+                <span className="text-[10px] font-bold text-[var(--text-2)] uppercase w-8">QTY</span>
+                <div className="flex items-center gap-1.5 flex-1">
+                  <input
+                    type="number"
+                    value={result.tradeQty}
+                    min={1}
+                    max={result.sharesBefore}
+                    step={1}
+                    onChange={(e) => {
+                      const v = Math.round(parseFloat(e.target.value));
+                      if (!isNaN(v) && v >= 1 && v <= result.sharesBefore) onCycleUpdate(i, 'sellQty', v);
+                    }}
+                    className="w-20 px-2 py-1.5 text-sm font-bold bg-white border border-[var(--border)] rounded-lg focus:outline-none text-center"
+                    inputMode="numeric"
+                  />
+                  <span className="text-[10px] text-[var(--text-2)]">of {fmtShares(result.sharesBefore)} shares</span>
+                  {isPartial && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-auto"
+                      style={{ background: stock.color + '22', color: stock.color }}>
+                      {Math.round((result.tradeQty / result.sharesBefore) * 100)}% swing
+                    </span>
+                  )}
+                  {!isPartial && (
+                    <span className="text-[9px] text-[var(--text-3)] ml-auto">full position</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Sell / Buy price controls */}
               <PriceControl label="SELL" arrow="↑" arrowColor="var(--warning)"
                 value={cycle.sell} min={sellMin} max={sellMax} step={0.5} color={stock.color}
                 invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'sell', v)} currentPrice={stock.currentPrice} />
               <PriceControl label="BUY" arrow="↓" arrowColor="var(--success)"
                 value={cycle.buy} min={buyMin} max={buyMax} step={0.5} color={stock.color}
                 invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'buy', v)} currentPrice={stock.currentPrice} />
+
+              {/* Scenario outcomes — always visible, extra prominent for partial */}
+              {result.valid && (
+                <div className="mt-2 rounded-lg overflow-hidden border border-[var(--border)]">
+                  {/* Core held */}
+                  {isPartial && (
+                    <div className="px-2.5 py-1.5 flex items-center justify-between text-[10px]"
+                      style={{ background: 'var(--bg-card-2)', borderBottom: '1px solid var(--border)' }}>
+                      <span className="text-[var(--text-2)]">Core held throughout</span>
+                      <span className="font-bold text-[var(--text)]">{fmtShares(result.coreQty)} sh · {fmt(result.coreQty * stock.currentPrice)}</span>
+                    </div>
+                  )}
+                  {/* Optimal: GTC fires */}
+                  <div className="px-2.5 py-1.5 flex items-center justify-between text-[10px]"
+                    style={{ background: '#F0FDF4', borderBottom: isPartial ? '1px solid var(--border)' : undefined }}>
+                    <span className="font-bold text-green-700">✓ GTC fires at ${result.buy.toFixed(2)}</span>
+                    <span className="font-bold text-green-700">
+                      {fmtShares(result.sharesBefore)} → {fmtShares(result.sharesAfter)} sh&nbsp;
+                      (+{result.gainPct.toFixed(1)}%)
+                    </span>
+                  </div>
+                  {/* Chase scenario */}
+                  {isPartial && (
+                    <div className="px-2.5 py-1.5 flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-red-600 font-bold">✗ Chase at ${result.chasePrice.toFixed(2)}</span>
+                        <span className="text-[var(--text-3)]">(+{cycle.chasePercent ?? 12}%)</span>
+                        <button
+                          className="text-[8px] text-[var(--text-3)] underline"
+                          onClick={() => {
+                            const cur = cycle.chasePercent ?? 12;
+                            const next = cur === 8 ? 10 : cur === 10 ? 12 : cur === 12 ? 15 : cur === 15 ? 20 : 8;
+                            onCycleUpdate(i, 'chasePercent', next);
+                          }}
+                        >edit</button>
+                      </div>
+                      <span className="font-bold" style={{ color: chaseGainPct >= 0 ? 'var(--text-2)' : 'var(--danger)' }}>
+                        {fmtShares(result.sharesBefore)} → {fmtShares(result.sharesAfterChase)} sh&nbsp;
+                        ({chaseGainPct >= 0 ? '+' : ''}{chaseGainPct.toFixed(1)}%)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
