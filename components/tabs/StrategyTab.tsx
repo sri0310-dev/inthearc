@@ -153,16 +153,18 @@ function BlendedView({ stocks, activeCycles, onCyclesChange }: { stocks: Stock[]
   const rows = useMemo(() =>
     labels.map((label, i) => {
       const stockData = stocks.map((stock) => {
-        if (i === 0) return { shares: stock.initialShares, value: stock.initialShares * stock.targetPrice, gainPct: 0 };
+        if (i === 0) return { shares: stock.initialShares, valueAtTarget: stock.initialShares * stock.targetPrice, valueNow: stock.initialShares * stock.currentPrice, gainPct: 0 };
         const proj = computeProjection(stock, i);
         return {
           shares: proj.finalShares,
-          value: proj.valueAtTarget,
+          valueAtTarget: proj.valueAtTarget,
+          valueNow: proj.finalShares * stock.currentPrice,
           gainPct: (proj.finalShares / stock.initialShares - 1) * 100,
         };
       });
-      const total = stockData.reduce((s, d) => s + d.value, 0);
-      return { label, stockData, total };
+      const endGame = stockData.reduce((s, d) => s + d.valueAtTarget, 0);
+      const currentVal = stockData.reduce((s, d) => s + d.valueNow, 0);
+      return { label, stockData, endGame, currentVal };
     }), [stocks, activeCycles, labels]);
 
   const cyclesToMillion = useMemo(() => {
@@ -176,7 +178,7 @@ function BlendedView({ stocks, activeCycles, onCyclesChange }: { stocks: Stock[]
     <div className="flex flex-col h-full">
       {/* Cycles control */}
       <div className="flex items-center justify-between px-1 mb-3 flex-shrink-0">
-        <div className="text-xs text-[var(--text-2)]">
+        <div className="text-xs">
           {cyclesToMillion !== null
             ? <span style={{ color: 'var(--success)', fontWeight: 700 }}>✓ $1M at C{cyclesToMillion}</span>
             : <span className="text-[var(--text-2)]">&gt;20 cycles to $1M</span>}
@@ -195,82 +197,82 @@ function BlendedView({ stocks, activeCycles, onCyclesChange }: { stocks: Stock[]
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="rounded-2xl bg-white border border-[var(--border)] p-3 mb-3 flex-shrink-0">
-        <div className="flex items-center gap-3 mb-2 flex-wrap">
-          <span className="text-xs font-semibold text-[var(--text)]">Portfolio divergence to $1M</span>
-          {stocks.map(s => (
-            <div key={s.id} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full" style={{ background: s.color }} />
-              <span className="text-[10px] text-[var(--text-2)]">{s.name}</span>
-            </div>
-          ))}
-          <div className="flex items-center gap-1">
-            <div className="w-4 border-t-2 border-dashed border-[#1A1A2E]" />
-            <span className="text-[10px] text-[var(--text-2)]">Total</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-4 border-t border-dashed border-red-500" />
-            <span className="text-[10px] text-[var(--text-2)]">$1M</span>
-          </div>
-        </div>
-        <div style={{ height: 200 }}>
-          <BlendedChart stocks={stocks} activeCycles={activeCycles} />
-        </div>
-      </div>
-
-      {/* Table */}
+      {/* Table only — no chart */}
       <div className="rounded-2xl bg-white border border-[var(--border)] overflow-hidden flex-1 min-h-0">
         <div className="overflow-auto h-full">
           <table className="w-full text-xs">
             <thead>
               <tr style={{ background: 'var(--bg-card-2)', borderBottom: '1px solid var(--border)' }}>
-                <th className="text-left px-3 py-2.5 text-[var(--text-2)] font-semibold">Cycle</th>
+                <th className="text-left px-3 py-2.5 text-[var(--text-2)] font-semibold sticky left-0 bg-[var(--bg-card-2)]">Cycle</th>
                 {stocks.map(s => (
-                  <th key={s.id} className="px-2 py-2.5 font-semibold" style={{ color: s.color }}>
+                  <th key={s.id} className="px-2 py-2.5 font-semibold text-center" style={{ color: s.color }}>
                     <div>{s.name}</div>
                     <div className="text-[9px] font-normal text-[var(--text-3)]">sh · @${s.targetPrice}</div>
                   </th>
                 ))}
-                <th className="px-3 py-2.5 text-right font-semibold text-[var(--text)]">Total</th>
+                {/* Current value column */}
+                <th className="px-2 py-2.5 text-center font-semibold text-[var(--text-2)]">
+                  <div>Portfolio</div>
+                  <div className="text-[9px] font-normal text-[var(--text-3)]">live prices</div>
+                </th>
+                {/* End game column */}
+                <th className="px-3 py-2.5 text-right font-semibold" style={{ color: 'var(--success)', whiteSpace: 'nowrap' }}>
+                  <div>End Game</div>
+                  <div className="text-[9px] font-normal text-[var(--text-3)]">at targets</div>
+                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row, i) => {
-                const pct = Math.min((row.total / 1_000_000) * 100, 100);
-                const isHighlight = row.total >= 1_000_000;
+                const pct = Math.min((row.endGame / 1_000_000) * 100, 100);
+                const isHighlight = row.endGame >= 1_000_000;
                 return (
                   <tr key={row.label}
                     style={{
                       borderBottom: '1px solid var(--border)',
                       background: isHighlight ? 'var(--success-bg)' : i === 0 ? 'var(--bg-card-2)' : 'white',
                     }}>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold" style={{ color: isHighlight ? 'var(--success)' : 'var(--text)' }}>
-                          {isHighlight ? '🏆' : ''}{row.label}
-                        </span>
-                      </div>
-                      {/* Mini progress bar */}
-                      <div className="h-1 rounded-full bg-[var(--border)] mt-1 w-16 overflow-hidden">
-                        <div className="h-full rounded-full transition-all"
+                    {/* Cycle label + progress */}
+                    <td className="px-3 py-3 sticky left-0" style={{ background: isHighlight ? 'var(--success-bg)' : i === 0 ? 'var(--bg-card-2)' : 'white' }}>
+                      <span className="font-bold" style={{ color: isHighlight ? 'var(--success)' : 'var(--text)' }}>
+                        {isHighlight ? '🏆 ' : ''}{row.label}
+                      </span>
+                      <div className="h-1 rounded-full bg-[var(--border)] mt-1.5 w-14 overflow-hidden">
+                        <div className="h-full rounded-full transition-all duration-500"
                           style={{ width: `${pct}%`, background: isHighlight ? 'var(--success)' : 'var(--cifr)' }} />
                       </div>
                       <div className="text-[9px] text-[var(--text-3)] mt-0.5">{pct.toFixed(0)}%</div>
                     </td>
+
+                    {/* Per-stock cells */}
                     {row.stockData.map((d, si) => (
-                      <td key={si} className="px-2 py-2.5 text-center">
+                      <td key={si} className="px-2 py-3 text-center">
                         <div className="font-bold text-[var(--text)]">{fmtShares(d.shares)}</div>
-                        <div className="text-[10px]" style={{ color: 'var(--success)' }}>{fmt(d.value)}</div>
+                        <div className="text-[10px]" style={{ color: 'var(--success)' }}>{fmt(d.valueAtTarget)}</div>
                         {i > 0 && d.gainPct > 0 && (
                           <div className="text-[9px]" style={{ color: stocks[si].color }}>+{d.gainPct.toFixed(1)}%</div>
                         )}
                       </td>
                     ))}
-                    <td className="px-3 py-2.5 text-right">
+
+                    {/* Current portfolio value (live prices) */}
+                    <td className="px-2 py-3 text-center">
+                      <div className="font-bold text-[var(--text)]">{fmt(row.currentVal)}</div>
+                      {i > 0 && (
+                        <div className="text-[9px]" style={{ color: 'var(--text-3)' }}>
+                          +{fmt(row.currentVal - rows[0].currentVal)}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* End game column */}
+                    <td className="px-3 py-3 text-right">
                       <div className="font-bold" style={{ color: isHighlight ? 'var(--success)' : 'var(--text)', fontSize: 13 }}>
-                        {fmt(row.total)}
+                        {fmt(row.endGame)}
                       </div>
+                      {isHighlight && (
+                        <div className="text-[9px] font-bold" style={{ color: 'var(--success)' }}>$1M ✓</div>
+                      )}
                     </td>
                   </tr>
                 );
