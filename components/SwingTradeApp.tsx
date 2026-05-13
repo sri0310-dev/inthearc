@@ -85,29 +85,31 @@ export default function SwingTradeApp() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [alertsFired, setAlertsFired] = useState<Record<string, number>>({});
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Stable ref so the interval always calls the latest fetchPrices
+  const fetchPricesRef = useRef<() => void>(() => {});
 
   // Persist on change
   useEffect(() => {
     saveState({ stocks, activeCycles, activeTab, isFetching, fetchError, lastFetched, refreshInterval, notificationsEnabled, alertsFired });
   }, [stocks, activeCycles]);
 
-  // Auto-refresh
+  // Auto-refresh — uses ref so interval never becomes stale
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (refreshInterval > 0) {
-      intervalRef.current = setInterval(fetchPrices, refreshInterval * 60 * 1000);
+      intervalRef.current = setInterval(() => fetchPricesRef.current(), refreshInterval * 60 * 1000);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [refreshInterval]);
 
-  // Fetch prices on mount
-  useEffect(() => { fetchPrices(); }, []);
+  // Fetch on mount
+  useEffect(() => { fetchPricesRef.current(); }, []);
 
   const fetchPrices = useCallback(async () => {
     setIsFetching(true);
     setFetchError(false);
     try {
-      const res = await fetch('/api/prices');
+      const res = await fetch('/api/prices', { cache: 'no-store' });
       if (!res.ok) throw new Error('fetch failed');
       const data = await res.json();
       setStocks((prev) =>
@@ -116,13 +118,15 @@ export default function SwingTradeApp() {
         )
       );
       setLastFetched(data.fetchedAt ?? new Date().toISOString());
-      checkAlerts(data);
     } catch {
       setFetchError(true);
     } finally {
       setIsFetching(false);
     }
   }, []);
+
+  // Keep ref in sync
+  useEffect(() => { fetchPricesRef.current = fetchPrices; }, [fetchPrices]);
 
   function checkAlerts(prices: Record<string, number>) {
     if (!notificationsEnabled || typeof Notification === 'undefined') return;
@@ -176,48 +180,73 @@ export default function SwingTradeApp() {
     setStocks((prev) => prev.map((s) => s.id === stockId ? { ...s, targetPrice: value } : s));
   }, []);
 
-  // Stale indicator
   const isStale = lastFetched ? (Date.now() - new Date(lastFetched).getTime()) > 5 * 60 * 1000 : false;
-  const dotColor = isFetching ? '#F59E0B' : isStale ? '#F59E0B' : '#22C55E';
+  const dotColor = isFetching ? '#F59E0B' : fetchError ? '#EF4444' : isStale ? '#F59E0B' : '#22C55E';
 
   const projectedValue = computePortfolioValue(stocks, activeCycles);
+
+  const AUTO_REFRESH_OPTS = [
+    { label: 'Off', value: 0 },
+    { label: '1m', value: 1 },
+    { label: '5m', value: 5 },
+    { label: '15m', value: 15 },
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', maxWidth: 680, margin: '0 auto' }}>
       {/* Live price bar */}
-      <div style={{ background: 'white', borderBottom: '1px solid var(--border)', padding: '10px 16px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {/* Dot */}
+      <div style={{ background: 'white', borderBottom: '1px solid var(--border)', padding: '8px 16px', flexShrink: 0 }}>
+        {/* Row 1: tickers + refresh button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div
             style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }}
             className={isFetching ? 'animate-pulse-dot' : ''}
           />
-          {/* Tickers */}
           {stocks.map((s) => (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: s.color }}>{s.ticker}</span>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>${s.currentPrice.toFixed(2)}</span>
             </div>
           ))}
           <div style={{ flex: 1 }} />
-          {/* Refresh */}
           <button
             onClick={fetchPrices}
             disabled={isFetching}
             style={{
-              fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
-              background: 'var(--bg-card-2)', border: '1px solid var(--border)',
-              color: 'var(--text-2)', cursor: 'pointer', opacity: isFetching ? 0.5 : 1,
+              fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 20,
+              background: isFetching ? 'var(--bg-card-2)' : fetchError ? 'var(--danger-bg)' : 'var(--bg-card-2)',
+              border: `1px solid ${fetchError ? 'var(--danger)' : 'var(--border)'}`,
+              color: fetchError ? 'var(--danger)' : 'var(--text-2)',
+              cursor: isFetching ? 'default' : 'pointer',
+              opacity: isFetching ? 0.6 : 1,
+              transition: 'all 0.15s',
             }}
           >
-            {isFetching ? '…' : fetchError ? '⚠ Retry' : 'Refresh'}
+            {isFetching ? '⟳ Fetching…' : fetchError ? '⚠ Retry' : '⟳ Refresh'}
           </button>
         </div>
-        {lastFetched && (
-          <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 3 }}>
-            {isStale ? '⚠ Stale · ' : ''}Updated {new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {/* Row 2: timestamp + auto-refresh pills */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 5 }}>
+          <div style={{ fontSize: 10, color: isStale ? 'var(--warning)' : 'var(--text-3)' }}>
+            {!lastFetched
+              ? 'Tap Refresh to fetch live prices'
+              : `${isStale ? '⚠ Stale · ' : ''}${new Date(lastFetched).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
           </div>
-        )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 9, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Auto</span>
+            {AUTO_REFRESH_OPTS.map((o) => (
+              <button key={o.value} onClick={() => setRefreshInterval(o.value)}
+                style={{
+                  fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 10, border: 'none',
+                  background: refreshInterval === o.value ? 'var(--text)' : 'var(--bg-card-2)',
+                  color: refreshInterval === o.value ? 'white' : 'var(--text-3)',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Desktop tab nav */}
