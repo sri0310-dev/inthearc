@@ -9,6 +9,7 @@ interface Props {
   onCyclesChange: (n: number) => void;
   onCycleUpdate: (stockId: string, cycleIndex: number, field: 'sell' | 'buy' | 'sellQty' | 'chasePercent', value: number) => void;
   onTargetUpdate: (stockId: string, value: number) => void;
+  onActiveTrade: (stockId: string, cycleIndex: number, trade: { soldAt: number; soldQty: number } | null) => void;
 }
 
 // ─── Blended chart ───────────────────────────────────────────────────────────
@@ -329,11 +330,168 @@ function PriceControl({ label, arrow, arrowColor, value, min, max, step, color, 
 }
 
 // ─── Single stock view ───────────────────────────────────────────────────────
-function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
+function MarkSoldForm({ result, cycle, stock, onConfirm, onCancel }: {
+  result: import('@/lib/types').CycleResult;
+  cycle: CycleTarget;
+  stock: Stock;
+  onConfirm: (soldAt: number, soldQty: number) => void;
+  onCancel: () => void;
+}) {
+  const [soldAt, setSoldAt] = useState(cycle.sell.toFixed(2));
+  const [soldQty, setSoldQty] = useState(String(result.tradeQty));
+
+  const qty = parseFloat(soldQty);
+  const price = parseFloat(soldAt);
+  const cashRaised = !isNaN(qty) && !isNaN(price) ? qty * price : 0;
+
+  return (
+    <div className="rounded-xl border-2 p-3 mt-2" style={{ borderColor: 'var(--warning)', background: '#FFFBEB' }}>
+      <div className="text-xs font-bold text-amber-700 mb-2">🔴 Log executed sell</div>
+      <div className="flex gap-2 mb-2">
+        <div className="flex-1">
+          <div className="text-[10px] text-[var(--text-2)] mb-1">Sold price</div>
+          <div className="flex items-center gap-1 bg-white border border-[var(--border)] rounded-lg px-2 py-1.5">
+            <span className="text-xs text-[var(--text-2)]">$</span>
+            <input type="number" value={soldAt} onChange={e => setSoldAt(e.target.value)}
+              className="flex-1 text-sm font-bold bg-transparent focus:outline-none" inputMode="decimal" />
+          </div>
+        </div>
+        <div className="flex-1">
+          <div className="text-[10px] text-[var(--text-2)] mb-1">Qty sold</div>
+          <input type="number" value={soldQty} onChange={e => setSoldQty(e.target.value)}
+            className="w-full px-2 py-1.5 text-sm font-bold bg-white border border-[var(--border)] rounded-lg focus:outline-none text-center" inputMode="numeric" />
+        </div>
+      </div>
+      {cashRaised > 0 && (
+        <div className="text-[10px] text-amber-700 mb-2">
+          Cash raised: <span className="font-bold">{fmt(cashRaised)}</span>
+          {' · '}Will buy <span className="font-bold">~{fmtShares(cashRaised / cycle.buy)}</span> sh at ${cycle.buy.toFixed(2)}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button onClick={() => onConfirm(parseFloat(soldAt), parseFloat(soldQty))}
+          className="flex-1 py-1.5 rounded-lg text-xs font-bold text-white"
+          style={{ background: 'var(--warning)' }}>
+          Confirm Sold
+        </button>
+        <button onClick={onCancel}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold text-[var(--text-2)] bg-[var(--bg-card-2)]">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveTradePanel({ stock, cycleIndex, cycle, result, currentPrice, onClear, onBuyUpdate }: {
+  stock: Stock;
+  cycleIndex: number;
+  cycle: CycleTarget;
+  result: import('@/lib/types').CycleResult;
+  currentPrice: number;
+  onClear: () => void;
+  onBuyUpdate: (v: number) => void;
+}) {
+  const trade = cycle.activeTrade!;
+  const cashRaised = trade.soldAt * trade.soldQty;
+  const coreQty = result.sharesBefore - trade.soldQty;
+  const sharesOnGTC = cashRaised / cycle.buy;
+  const totalOnGTC = coreQty + sharesOnGTC;
+  const gainShares = totalOnGTC - result.sharesBefore;
+  const gainPct = (totalOnGTC / result.sharesBefore - 1) * 100;
+
+  const distToBuy = ((currentPrice - cycle.buy) / cycle.buy) * 100;
+  const nearBuy = Math.abs(distToBuy) < 3;
+  const aboveSell = currentPrice > trade.soldAt;
+
+  return (
+    <div className="rounded-xl overflow-hidden border-2 mt-2" style={{ borderColor: stock.color }}>
+      {/* Active banner */}
+      <div className="px-3 py-2 flex items-center justify-between" style={{ background: stock.color }}>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse-dot" />
+          <span className="text-xs font-bold text-white">C{cycleIndex + 1} ACTIVE — waiting for GTC</span>
+        </div>
+        <button onClick={onClear} className="text-[10px] text-white/70 hover:text-white">✕ Clear</button>
+      </div>
+
+      <div className="p-3 space-y-2" style={{ background: stock.color + '08' }}>
+        {/* Sold row — frozen */}
+        <div className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-[var(--border)]">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">SOLD 🔒</span>
+            <span className="text-xs text-[var(--text-2)]">{fmtShares(trade.soldQty)} sh</span>
+          </div>
+          <div className="text-right">
+            <div className="text-sm font-bold text-[var(--text)]">${trade.soldAt.toFixed(2)}</div>
+            <div className="text-[10px] text-[var(--text-2)]">{fmt(cashRaised)} raised</div>
+          </div>
+        </div>
+
+        {/* Current price vs sold */}
+        <div className="flex items-center gap-2 px-1">
+          <div className="flex-1 h-px bg-[var(--border)]" />
+          <span className="text-[10px] font-medium" style={{ color: aboveSell ? 'var(--success)' : 'var(--text-2)' }}>
+            live ${currentPrice.toFixed(2)} {aboveSell ? '↑ still running' : '↓ pulling back'}
+          </span>
+          <div className="flex-1 h-px bg-[var(--border)]" />
+        </div>
+
+        {/* GTC buy — editable */}
+        <div className={`rounded-xl p-2.5 border ${nearBuy ? 'border-green-400 bg-green-50' : 'border-[var(--border)] bg-white'}`}>
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded">
+                {nearBuy ? '🎯 GTC NEAR!' : 'GTC BUY'}
+              </span>
+              <span className="text-[10px] text-[var(--text-2)]">{distToBuy >= 0 ? '+' : ''}{distToBuy.toFixed(1)}% from live</span>
+            </div>
+            <span className="text-[10px] font-medium" style={{ color: 'var(--success)' }}>
+              ~{fmtShares(sharesOnGTC)} sh · core {fmtShares(coreQty)} untouched
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-[var(--text-2)]">$</span>
+              <input type="number" value={cycle.buy.toFixed(2)} step={0.5}
+                onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onBuyUpdate(v); }}
+                className="w-full pl-5 pr-2 py-2 text-sm font-bold bg-white border border-green-300 rounded-lg focus:outline-none"
+                inputMode="decimal" />
+            </div>
+          </div>
+          <input type="range" min={currentPrice * 0.5} max={trade.soldAt * 0.99} step={0.5}
+            value={Math.min(Math.max(cycle.buy, currentPrice * 0.5), trade.soldAt * 0.99)}
+            onChange={e => onBuyUpdate(parseFloat(e.target.value))}
+            className="w-full mt-2" style={{ accentColor: stock.color }} />
+        </div>
+
+        {/* Outcome summary */}
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div>
+            <div className="text-[10px] text-[var(--text-2)]">If GTC fires</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--success)' }}>
+              {fmtShares(result.sharesBefore)} → {fmtShares(totalOnGTC)} sh
+            </div>
+            <div className="text-[10px]" style={{ color: stock.color }}>+{fmtShares(gainShares)} sh (+{gainPct.toFixed(1)}%)</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] text-[var(--text-2)]">at ${stock.targetPrice} target</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--success)' }}>{fmt(totalOnGTC * stock.targetPrice)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate, onActiveTrade }: {
   stock: Stock; activeCycles: number;
   onCycleUpdate: (cycleIndex: number, field: 'sell' | 'buy' | 'sellQty' | 'chasePercent', value: number) => void;
   onTargetUpdate: (value: number) => void;
+  onActiveTrade: (cycleIndex: number, trade: { soldAt: number; soldQty: number } | null) => void;
 }) {
+  const [showSoldFormFor, setShowSoldFormFor] = useState<number | null>(null);
+
   const cycleResults = useMemo(
     () => computeCycles(stock.initialShares, stock.cycles, activeCycles),
     [stock.initialShares, stock.cycles, activeCycles]
@@ -399,17 +557,26 @@ function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full"
                     style={{ background: stock.color + '22', color: stock.color }}>C{i + 1}</span>
-                  {nearSell && <span className="text-[9px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">NEAR SELL</span>}
-                  {nearBuy && <span className="text-[9px] font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">NEAR BUY</span>}
+                  {nearSell && !cycle.activeTrade && <span className="text-[9px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded-full">NEAR SELL</span>}
+                  {nearBuy && !cycle.activeTrade && <span className="text-[9px] font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded-full">NEAR BUY</span>}
                 </div>
-                {result.valid ? (
-                  <span className="text-xs font-bold" style={{ color: 'var(--success)' }}>
-                    {fmtShares(result.sharesBefore)} → {fmtShares(result.sharesAfter)}&nbsp;
-                    <span style={{ color: stock.color }}>+{result.gainPct.toFixed(1)}%</span>
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-[var(--danger)]">Buy must be &lt; Sell</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {result.valid && !cycle.activeTrade && (
+                    <span className="text-xs font-bold" style={{ color: 'var(--success)' }}>
+                      {fmtShares(result.sharesBefore)} → {fmtShares(result.sharesAfter)}&nbsp;
+                      <span style={{ color: stock.color }}>+{result.gainPct.toFixed(1)}%</span>
+                    </span>
+                  )}
+                  {!result.valid && <span className="text-[10px] text-[var(--danger)]">Buy must be &lt; Sell</span>}
+                  {/* Mark sold toggle */}
+                  {result.valid && !cycle.activeTrade && showSoldFormFor !== i && (
+                    <button onClick={() => setShowSoldFormFor(i)}
+                      className="text-[9px] font-bold px-2 py-1 rounded-full border transition-all"
+                      style={{ borderColor: 'var(--warning)', color: 'var(--warning)', background: 'transparent' }}>
+                      Mark Sold
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Qty to sell row */}
@@ -442,13 +609,35 @@ function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
                 </div>
               </div>
 
-              {/* Sell / Buy price controls */}
-              <PriceControl label="SELL" arrow="↑" arrowColor="var(--warning)"
-                value={cycle.sell} min={sellMin} max={sellMax} step={0.5} color={stock.color}
-                invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'sell', v)} currentPrice={stock.currentPrice} />
-              <PriceControl label="BUY" arrow="↓" arrowColor="var(--success)"
-                value={cycle.buy} min={buyMin} max={buyMax} step={0.5} color={stock.color}
-                invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'buy', v)} currentPrice={stock.currentPrice} />
+              {/* Sell form / active trade panel / normal controls */}
+              {showSoldFormFor === i && !cycle.activeTrade ? (
+                <MarkSoldForm
+                  result={result} cycle={cycle} stock={stock}
+                  onConfirm={(soldAt, soldQty) => {
+                    if (!isNaN(soldAt) && !isNaN(soldQty) && soldAt > 0 && soldQty > 0) {
+                      onActiveTrade(i, { soldAt, soldQty });
+                    }
+                    setShowSoldFormFor(null);
+                  }}
+                  onCancel={() => setShowSoldFormFor(null)}
+                />
+              ) : cycle.activeTrade ? (
+                <ActiveTradePanel
+                  stock={stock} cycleIndex={i} cycle={cycle} result={result}
+                  currentPrice={stock.currentPrice}
+                  onClear={() => onActiveTrade(i, null)}
+                  onBuyUpdate={(v) => onCycleUpdate(i, 'buy', v)}
+                />
+              ) : (
+                <>
+                  <PriceControl label="SELL" arrow="↑" arrowColor="var(--warning)"
+                    value={cycle.sell} min={sellMin} max={sellMax} step={0.5} color={stock.color}
+                    invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'sell', v)} currentPrice={stock.currentPrice} />
+                  <PriceControl label="BUY" arrow="↓" arrowColor="var(--success)"
+                    value={cycle.buy} min={buyMin} max={buyMax} step={0.5} color={stock.color}
+                    invalid={!result.valid} onChange={(v) => onCycleUpdate(i, 'buy', v)} currentPrice={stock.currentPrice} />
+                </>
+              )}
 
               {/* Scenario outcomes — always visible, extra prominent for partial */}
               {result.valid && (
@@ -517,7 +706,7 @@ function StockView({ stock, activeCycles, onCycleUpdate, onTargetUpdate }: {
 }
 
 // ─── Main StrategyTab ─────────────────────────────────────────────────────────
-export default function StrategyTab({ stocks, activeCycles, onCyclesChange, onCycleUpdate, onTargetUpdate }: Props) {
+export default function StrategyTab({ stocks, activeCycles, onCyclesChange, onCycleUpdate, onTargetUpdate, onActiveTrade }: Props) {
   const stockTabs = stocks.map(s => ({ id: s.id, label: s.name, color: s.color }));
   const allTabs = [...stockTabs, { id: 'blended', label: 'Blended', color: '#1A1A2E' }];
   const [activeStockId, setActiveStockId] = useState(stocks[0]?.id ?? 'blended');
@@ -569,6 +758,7 @@ export default function StrategyTab({ stocks, activeCycles, onCyclesChange, onCy
             activeCycles={activeCycles}
             onCycleUpdate={(cycleIndex, field, value) => onCycleUpdate(activeStock.id, cycleIndex, field, value)}
             onTargetUpdate={(value) => onTargetUpdate(activeStock.id, value)}
+            onActiveTrade={(cycleIndex, trade) => onActiveTrade(activeStock.id, cycleIndex, trade)}
           />
         ) : null}
       </div>

@@ -176,6 +176,22 @@ export default function SwingTradeApp() {
     );
   }, []);
 
+  const handleActiveTrade = useCallback((
+    stockId: string,
+    cycleIndex: number,
+    trade: { soldAt: number; soldQty: number } | null
+  ) => {
+    setStocks((prev) =>
+      prev.map((s) => {
+        if (s.id !== stockId) return s;
+        const cycles = [...s.cycles];
+        if (!cycles[cycleIndex]) return s;
+        cycles[cycleIndex] = { ...cycles[cycleIndex], activeTrade: trade ?? undefined };
+        return { ...s, cycles };
+      })
+    );
+  }, []);
+
   const handleTargetUpdate = useCallback((stockId: string, value: number) => {
     setStocks((prev) => prev.map((s) => s.id === stockId ? { ...s, targetPrice: value } : s));
   }, []);
@@ -286,6 +302,7 @@ export default function SwingTradeApp() {
             onCyclesChange={setActiveCycles}
             onCycleUpdate={handleCycleUpdate}
             onTargetUpdate={handleTargetUpdate}
+            onActiveTrade={handleActiveTrade}
           />
         )}
         {activeTab === 'journey' && (
