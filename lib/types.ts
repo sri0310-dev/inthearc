@@ -3,6 +3,10 @@ export interface CycleTarget {
   buy: number;
   sellQty?: number;       // undefined = full position
   chasePercent?: number;  // % above sell to chase back in, default 12
+  activeTrade?: {
+    soldAt: number;       // actual executed sell price
+    soldQty: number;      // actual qty sold
+  };
 }
 
 export interface Stock {
