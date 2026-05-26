@@ -1,6 +1,6 @@
 'use client';
-import { useMemo, useRef, useEffect } from 'react';
-import { Stock } from '@/lib/types';
+import { useMemo, useRef, useEffect, useState } from 'react';
+import { Stock, ShareAdjustment } from '@/lib/types';
 import {
   computePortfolioValue,
   computeCurrentPortfolioValue,
@@ -16,6 +16,7 @@ interface Props {
   stocks: Stock[];
   activeCycles: number;
   onCyclesChange: (n: number) => void;
+  onAdjustShares: (stockId: string, newShares: number, note?: string) => void;
 }
 
 const MILESTONES = [
@@ -120,7 +121,10 @@ function PortfolioChart({ stocks, activeCycles }: { stocks: Stock[]; activeCycle
   );
 }
 
-export default function OverviewTab({ stocks, activeCycles, onCyclesChange }: Props) {
+export default function OverviewTab({ stocks, activeCycles, onCyclesChange, onAdjustShares }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editShares, setEditShares] = useState('');
+  const [editNote, setEditNote] = useState('');
   const currentValue = useMemo(() => computeCurrentPortfolioValue(stocks), [stocks]);
   const atTargetToday = useMemo(() => computeAtTargetTodayValue(stocks), [stocks]);
   const projectedValue = useMemo(() => computePortfolioValue(stocks, activeCycles), [stocks, activeCycles]);
@@ -257,20 +261,124 @@ export default function OverviewTab({ stocks, activeCycles, onCyclesChange }: Pr
         <PortfolioChart stocks={stocks} activeCycles={activeCycles} />
       </div>
 
-      {/* Per-stock summary */}
+      {/* Per-stock summary with edit */}
       <div className="grid grid-cols-3 gap-2">
         {projections.map(({ stock, finalShares, valueAtTarget }) => (
-          <div key={stock.id} className="rounded-2xl bg-white border border-[var(--border)] p-3 card-hover text-center">
-            <div className="w-2 h-2 rounded-full mx-auto mb-1.5" style={{ background: stock.color }} />
-            <div className="text-xs font-bold text-[var(--text)] mb-0.5">{stock.name}</div>
-            <div className="text-xs font-bold" style={{ color: stock.color }}>${stock.currentPrice.toFixed(2)}</div>
-            <div className="text-sm font-bold text-[var(--text)] mt-1">{fmtShares(finalShares)}</div>
-            <div className="text-[10px] text-[var(--text-2)]">shares</div>
-            <div className="text-xs font-bold mt-1" style={{ color: 'var(--success)' }}>{fmt(valueAtTarget)}</div>
-            <div className="text-[10px] text-[var(--text-2)]">at target</div>
+          <div key={stock.id} className="rounded-2xl bg-white border border-[var(--border)] p-3 card-hover text-center" style={{ gridColumn: editingId === stock.id ? '1 / -1' : undefined }}>
+            {editingId === stock.id ? (
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: stock.color }} />
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{stock.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>currently {stock.initialShares} sh</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 3, fontWeight: 600 }}>NEW SHARE COUNT</div>
+                    <input
+                      type="number"
+                      value={editShares}
+                      onChange={e => setEditShares(e.target.value)}
+                      placeholder={String(stock.initialShares)}
+                      autoFocus
+                      style={{
+                        width: '100%', padding: '8px 10px', borderRadius: 10, border: '1.5px solid var(--border)',
+                        fontSize: 16, fontWeight: 700, background: 'var(--bg)', outline: 'none',
+                        color: 'var(--text)',
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', marginBottom: 3, fontWeight: 600 }}>NOTE (OPTIONAL)</div>
+                  <input
+                    type="text"
+                    value={editNote}
+                    onChange={e => setEditNote(e.target.value)}
+                    placeholder="e.g. Added from separate account"
+                    style={{
+                      width: '100%', padding: '7px 10px', borderRadius: 10, border: '1.5px solid var(--border)',
+                      fontSize: 13, background: 'var(--bg)', outline: 'none', color: 'var(--text)',
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => {
+                      const n = parseFloat(editShares);
+                      if (!isNaN(n) && n > 0 && n !== stock.initialShares) {
+                        onAdjustShares(stock.id, n, editNote.trim() || undefined);
+                      }
+                      setEditingId(null); setEditShares(''); setEditNote('');
+                    }}
+                    style={{
+                      flex: 1, padding: '8px', borderRadius: 10, border: 'none',
+                      background: 'var(--text)', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >Save</button>
+                  <button
+                    onClick={() => { setEditingId(null); setEditShares(''); setEditNote(''); }}
+                    style={{
+                      padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)',
+                      background: 'transparent', fontSize: 13, color: 'var(--text-2)', cursor: 'pointer',
+                    }}
+                  >Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => { setEditingId(stock.id); setEditShares(String(stock.initialShares)); setEditNote(''); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-3)', padding: '0 2px', lineHeight: 1 }}
+                    title="Edit shares"
+                  >✏️</button>
+                </div>
+                <div className="w-2 h-2 rounded-full mx-auto mb-1.5" style={{ background: stock.color }} />
+                <div className="text-xs font-bold text-[var(--text)] mb-0.5">{stock.name}</div>
+                <div className="text-xs font-bold" style={{ color: stock.color }}>${stock.currentPrice.toFixed(2)}</div>
+                <div className="text-sm font-bold text-[var(--text)] mt-1">{fmtShares(finalShares)}</div>
+                <div className="text-[10px] text-[var(--text-2)]">shares</div>
+                <div className="text-xs font-bold mt-1" style={{ color: 'var(--success)' }}>{fmt(valueAtTarget)}</div>
+                <div className="text-[10px] text-[var(--text-2)]">at target</div>
+              </>
+            )}
           </div>
         ))}
       </div>
+
+      {/* Holdings history */}
+      {(() => {
+        const allEntries = stocks.flatMap(s =>
+          (s.adjustmentLog ?? []).map(e => ({ ...e, stock: s }))
+        ).sort((a, b) => b.at.localeCompare(a.at));
+        if (allEntries.length === 0) return null;
+        return (
+          <div className="rounded-2xl bg-white border border-[var(--border)] p-4 card-hover">
+            <div className="text-sm font-semibold mb-3 text-[var(--text)]">Holdings History</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {allEntries.map((e, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: i < allEntries.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: e.stock.color, flexShrink: 0, marginTop: 4 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: e.stock.color }}>{e.stock.ticker}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text)' }}>{e.from} → <strong>{e.to}</strong> sh</span>
+                      <span style={{ fontSize: 11, color: e.to > e.from ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                        {e.to > e.from ? '+' : ''}{e.to - e.from}
+                      </span>
+                    </div>
+                    {e.note && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{e.note}</div>}
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
+                      {new Date(e.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

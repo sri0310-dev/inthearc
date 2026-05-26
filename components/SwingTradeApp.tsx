@@ -196,6 +196,14 @@ export default function SwingTradeApp() {
     setStocks((prev) => prev.map((s) => s.id === stockId ? { ...s, targetPrice: value } : s));
   }, []);
 
+  const handleAdjustShares = useCallback((stockId: string, newShares: number, note?: string) => {
+    setStocks((prev) => prev.map((s) => {
+      if (s.id !== stockId) return s;
+      const entry = { at: new Date().toISOString(), from: s.initialShares, to: newShares, note };
+      return { ...s, initialShares: newShares, adjustmentLog: [...(s.adjustmentLog ?? []), entry] };
+    }));
+  }, []);
+
   const isStale = lastFetched ? (Date.now() - new Date(lastFetched).getTime()) > 5 * 60 * 1000 : false;
   const dotColor = isFetching ? '#F59E0B' : fetchError ? '#EF4444' : isStale ? '#F59E0B' : '#22C55E';
 
@@ -293,7 +301,7 @@ export default function SwingTradeApp() {
       {/* Tab content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px', WebkitOverflowScrolling: 'touch' }}>
         {activeTab === 'overview' && (
-          <OverviewTab stocks={stocks} activeCycles={activeCycles} onCyclesChange={setActiveCycles} />
+          <OverviewTab stocks={stocks} activeCycles={activeCycles} onCyclesChange={setActiveCycles} onAdjustShares={handleAdjustShares} />
         )}
         {activeTab === 'strategy' && (
           <StrategyTab
