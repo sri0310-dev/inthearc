@@ -88,23 +88,6 @@ export default function SwingTradeApp() {
   // Stable ref so the interval always calls the latest fetchPrices
   const fetchPricesRef = useRef<() => void>(() => {});
 
-  // Persist on change
-  useEffect(() => {
-    saveState({ stocks, activeCycles, activeTab, isFetching, fetchError, lastFetched, refreshInterval, notificationsEnabled, alertsFired });
-  }, [stocks, activeCycles]);
-
-  // Auto-refresh — uses ref so interval never becomes stale
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (refreshInterval > 0) {
-      intervalRef.current = setInterval(() => fetchPricesRef.current(), refreshInterval * 60 * 1000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [refreshInterval]);
-
-  // Fetch on mount
-  useEffect(() => { fetchPricesRef.current(); }, []);
-
   const fetchPrices = useCallback(async () => {
     setIsFetching(true);
     setFetchError(false);
@@ -125,8 +108,25 @@ export default function SwingTradeApp() {
     }
   }, []);
 
-  // Keep ref in sync
+  // Keep ref in sync so the auto-refresh interval always calls the latest fetchPrices
   useEffect(() => { fetchPricesRef.current = fetchPrices; }, [fetchPrices]);
+
+  // Persist on change
+  useEffect(() => {
+    saveState({ stocks, activeCycles, activeTab, isFetching, fetchError, lastFetched, refreshInterval, notificationsEnabled, alertsFired });
+  }, [stocks, activeCycles]);
+
+  // Fetch on mount
+  useEffect(() => { fetchPrices(); }, [fetchPrices]);
+
+  // Auto-refresh — interval uses ref so it always calls the latest fetchPrices
+  useEffect(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (refreshInterval > 0) {
+      intervalRef.current = setInterval(() => fetchPricesRef.current(), refreshInterval * 60 * 1000);
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [refreshInterval]);
 
   function checkAlerts(prices: Record<string, number>) {
     if (!notificationsEnabled || typeof Notification === 'undefined') return;
