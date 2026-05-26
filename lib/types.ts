@@ -9,6 +9,13 @@ export interface CycleTarget {
   };
 }
 
+export interface ShareAdjustment {
+  at: string;       // ISO timestamp
+  from: number;     // shares before
+  to: number;       // shares after
+  note?: string;    // optional memo
+}
+
 export interface Stock {
   id: string;
   name: string;
@@ -21,6 +28,7 @@ export interface Stock {
   currentPrice: number;
   targetPrice: number;
   cycles: CycleTarget[];
+  adjustmentLog?: ShareAdjustment[];
 }
 
 export interface CycleResult {
