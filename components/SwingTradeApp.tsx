@@ -2,34 +2,29 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Stock, Tab, AppState } from '@/lib/types';
 import { DEFAULT_STOCKS } from '@/lib/defaults';
-import { computePortfolioValue, isNearTarget } from '@/lib/compute';
+import { isNearTarget } from '@/lib/compute';
 import OverviewTab from './tabs/OverviewTab';
 import StrategyTab from './tabs/StrategyTab';
-import JourneyTab from './tabs/JourneyTab';
 import AlertsTab from './tabs/AlertsTab';
 
 // ─── Icons ──────────────────────────────────────────────────────────────────
-const icons = {
-  overview: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-      <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-    </svg>
-  ),
-  strategy: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
+const icons: Record<Tab, React.ReactNode> = {
+  portfolio: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="20" x2="18" y2="10"/>
+      <line x1="12" y1="20" x2="12" y2="4"/>
       <line x1="6" y1="20" x2="6" y2="14"/>
     </svg>
   ),
-  journey: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
-      <line x1="7" y1="12" x2="10" y2="12"/><line x1="14" y1="12" x2="17" y2="12"/>
+  simulate: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <polyline points="5 12 12 5 19 12"/>
+      <polyline points="5 12 12 19 19 12" transform="translate(0 8) scale(1 -1) translate(0 -16)"/>
     </svg>
   ),
   alerts: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
       <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
     </svg>
@@ -37,9 +32,8 @@ const icons = {
 };
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'strategy', label: 'Strategy' },
-  { id: 'journey', label: 'Journey' },
+  { id: 'portfolio', label: 'Portfolio' },
+  { id: 'simulate', label: 'Simulate' },
   { id: 'alerts', label: 'Alerts' },
 ];
 
@@ -77,7 +71,7 @@ export default function SwingTradeApp() {
   });
 
   const [activeCycles, setActiveCycles] = useState<number>(() => saved.activeCycles ?? 3);
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [isFetching, setIsFetching] = useState(false);
   const [fetchError, setFetchError] = useState(false);
   const [lastFetched, setLastFetched] = useState<string | null>(null);
@@ -128,33 +122,6 @@ export default function SwingTradeApp() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [refreshInterval]);
 
-  function checkAlerts(prices: Record<string, number>) {
-    if (!notificationsEnabled || typeof Notification === 'undefined') return;
-    const now = Date.now();
-    const COOLDOWN = 10 * 60 * 1000;
-    stocks.forEach((stock) => {
-      const live = prices[stock.ticker] ?? stock.currentPrice;
-      for (let i = 0; i < activeCycles; i++) {
-        const cycle = stock.cycles[i];
-        if (!cycle) continue;
-        const sellKey = `${stock.id}_c${i}_sell`;
-        const buyKey = `${stock.id}_c${i}_buy`;
-        if (isNearTarget(live, cycle.sell, 0.015) && (!alertsFired[sellKey] || now - alertsFired[sellKey] > COOLDOWN)) {
-          new Notification(`${stock.name} — C${i + 1} sell target approaching`, {
-            body: `Live $${live.toFixed(2)} near sell target $${cycle.sell.toFixed(2)}`,
-          });
-          setAlertsFired((prev) => ({ ...prev, [sellKey]: now }));
-        }
-        if (isNearTarget(live, cycle.buy, 0.015) && (!alertsFired[buyKey] || now - alertsFired[buyKey] > COOLDOWN)) {
-          new Notification(`${stock.name} — C${i + 1} buy-back zone`, {
-            body: `Live $${live.toFixed(2)} near buy target $${cycle.buy.toFixed(2)}`,
-          });
-          setAlertsFired((prev) => ({ ...prev, [buyKey]: now }));
-        }
-      }
-    });
-  }
-
   const handleEnableNotifications = useCallback(async () => {
     if (typeof Notification === 'undefined') return;
     const permission = await Notification.requestPermission();
@@ -170,7 +137,13 @@ export default function SwingTradeApp() {
           const last = cycles[cycles.length - 1] ?? { sell: s.currentPrice * 1.15, buy: s.currentPrice * 1.05 };
           cycles.push({ sell: last.sell * 1.05, buy: last.buy * 1.05 });
         }
-        cycles[cycleIndex] = { ...cycles[cycleIndex], [field]: value };
+        // For sellQty: if value > sharesBefore, treat as "All" (undefined)
+        if (field === 'sellQty' && value >= s.initialShares) {
+          const { sellQty: _removed, ...rest } = cycles[cycleIndex];
+          cycles[cycleIndex] = rest;
+        } else {
+          cycles[cycleIndex] = { ...cycles[cycleIndex], [field]: value };
+        }
         return { ...s, cycles };
       })
     );
@@ -206,8 +179,6 @@ export default function SwingTradeApp() {
 
   const isStale = lastFetched ? (Date.now() - new Date(lastFetched).getTime()) > 5 * 60 * 1000 : false;
   const dotColor = isFetching ? '#F59E0B' : fetchError ? '#EF4444' : isStale ? '#F59E0B' : '#22C55E';
-
-  const projectedValue = computePortfolioValue(stocks, activeCycles);
 
   const AUTO_REFRESH_OPTS = [
     { label: 'Off', value: 0 },
@@ -289,21 +260,14 @@ export default function SwingTradeApp() {
             {tab.label}
           </button>
         ))}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-2)' }}>Projected:</span>
-          <span style={{ fontSize: 13, fontWeight: 800, color: projectedValue >= 1_000_000 ? 'var(--success)' : 'var(--text)' }}>
-            ${projectedValue >= 1_000_000 ? (projectedValue / 1_000_000).toFixed(2) + 'M' : (projectedValue / 1000).toFixed(0) + 'K'}
-          </span>
-        </div>
       </div>
 
       {/* Tab content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px', WebkitOverflowScrolling: 'touch' }}>
-        {activeTab === 'overview' && (
-          <OverviewTab stocks={stocks} activeCycles={activeCycles} onCyclesChange={setActiveCycles} onAdjustShares={handleAdjustShares} />
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+        {activeTab === 'portfolio' && (
+          <OverviewTab stocks={stocks} onAdjustShares={handleAdjustShares} />
         )}
-        {activeTab === 'strategy' && (
+        {activeTab === 'simulate' && (
           <StrategyTab
             stocks={stocks}
             activeCycles={activeCycles}
@@ -312,9 +276,6 @@ export default function SwingTradeApp() {
             onTargetUpdate={handleTargetUpdate}
             onActiveTrade={handleActiveTrade}
           />
-        )}
-        {activeTab === 'journey' && (
-          <JourneyTab stocks={stocks} activeCycles={activeCycles} />
         )}
         {activeTab === 'alerts' && (
           <AlertsTab
