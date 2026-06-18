@@ -53,7 +53,7 @@ export interface StockProjection {
   valueAtTarget: number;
 }
 
-export type Tab = 'overview' | 'strategy' | 'journey' | 'alerts';
+export type Tab = 'portfolio' | 'simulate' | 'alerts';
 
 export interface AppState {
   stocks: Stock[];
